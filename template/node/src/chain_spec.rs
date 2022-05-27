@@ -163,6 +163,10 @@ fn testnet_genesis(
 			key: Some(root_key),
 		},
 		evm: EVMConfig {
+			account_pairs: {
+				let map: BTreeMap<_, _> = BTreeMap::new();
+				map
+			},
 			accounts: {
 				let mut map = BTreeMap::new();
 				map.insert(

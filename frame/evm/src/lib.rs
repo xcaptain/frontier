@@ -65,7 +65,7 @@ use frame_support::{
 	dispatch::DispatchResultWithPostInfo,
 	traits::{
 		tokens::fungible::Inspect, Currency, ExistenceRequirement, FindAuthor, Get, Imbalance,
-		OnUnbalanced, SignedImbalance, WithdrawReasons, IsType,
+		IsType, OnUnbalanced, SignedImbalance, WithdrawReasons,
 	},
 	weights::{Pays, PostDispatchInfo, Weight},
 };
@@ -365,22 +365,28 @@ pub mod pallet {
 	}
 
 	#[pallet::genesis_config]
-	pub struct GenesisConfig {
+	pub struct GenesisConfig<T: Config> {
+		pub account_pairs: std::collections::BTreeMap<H160, T::AccountId>,
 		pub accounts: std::collections::BTreeMap<H160, GenesisAccount>,
 	}
 
 	#[cfg(feature = "std")]
-	impl Default for GenesisConfig {
+	impl<T: Config> Default for GenesisConfig<T> {
 		fn default() -> Self {
 			Self {
+				account_pairs: Default::default(),
 				accounts: Default::default(),
 			}
 		}
 	}
 
 	#[pallet::genesis_build]
-	impl<T: Config> GenesisBuild<T> for GenesisConfig {
+	impl<T: Config> GenesisBuild<T> for GenesisConfig<T> {
 		fn build(&self) {
+			for (eth_addr, account_id) in &self.account_pairs {
+				<Accounts<T>>::insert(eth_addr, account_id);
+			}
+
 			for (address, account) in &self.accounts {
 				let account_id = T::AddressMapping::into_account_id(*address);
 
@@ -556,7 +562,10 @@ where
 {
 	type Success = T::AccountId;
 
-	fn try_address_origin(address: &H160, origin: OuterOrigin) -> Result<T::AccountId, OuterOrigin> {
+	fn try_address_origin(
+		address: &H160,
+		origin: OuterOrigin,
+	) -> Result<T::AccountId, OuterOrigin> {
 		origin.into().and_then(|o| match o {
 			RawOrigin::Signed(who) => {
 				if let Some(acc) = Accounts::<T>::get(address) {
