@@ -65,7 +65,7 @@ use frame_support::{
 	dispatch::DispatchResultWithPostInfo,
 	traits::{
 		tokens::fungible::Inspect, Currency, ExistenceRequirement, FindAuthor, Get, Imbalance,
-		OnUnbalanced, SignedImbalance, WithdrawReasons,
+		OnUnbalanced, SignedImbalance, WithdrawReasons, IsType,
 	},
 	weights::{Pays, PostDispatchInfo, Weight},
 };
@@ -412,6 +412,11 @@ pub mod pallet {
 	#[pallet::getter(fn account_storages)]
 	pub type AccountStorages<T: Config> =
 		StorageDoubleMap<_, Blake2_128Concat, H160, Blake2_128Concat, H256, H256, ValueQuery>;
+
+	/// Eth Address => AccountId
+	#[pallet::storage]
+	#[pallet::getter(fn accounts)]
+	pub type Accounts<T: Config> = StorageMap<_, Blake2_128Concat, H160, T::AccountId, OptionQuery>;
 }
 
 /// Type alias for currency balance.
@@ -509,6 +514,62 @@ where
 
 pub trait AddressMapping<A> {
 	fn into_account_id(address: H160) -> A;
+}
+
+pub struct PairedAddressMapping<T>(sp_std::marker::PhantomData<T>);
+
+impl<T: Config> AddressMapping<T::AccountId> for PairedAddressMapping<T>
+where
+	T::AccountId: IsType<AccountId32>,
+{
+	fn into_account_id(address: H160) -> T::AccountId {
+		if Accounts::<T>::contains_key(&address) {
+			if let Some(acc) = Accounts::<T>::get(address) {
+				return acc;
+			}
+		}
+
+		let mut data: [u8; 32] = [0u8; 32];
+		data[0..4].copy_from_slice(b"evm:");
+		data[4..24].copy_from_slice(&address[..]);
+		AccountId32::from(data).into()
+	}
+
+	// fn ensure_address_origin(address: &H160, origin: &T::AccountId) -> Result<(), DispatchError> {
+	// 	if let Some(acc) = Accounts::<T>::get(address) {
+	// 		if acc == *origin {
+	// 			return Ok(());
+	// 		}
+	// 	}
+
+	// 	Err(DispatchError::Other(
+	// 		"eth and substrate addresses are not paired",
+	// 	))
+	// }
+}
+
+pub struct EnsureAddressPaired<T>(sp_std::marker::PhantomData<T>);
+
+impl<OuterOrigin, T: Config> EnsureAddressOrigin<OuterOrigin> for EnsureAddressPaired<T>
+where
+	OuterOrigin: Into<Result<RawOrigin<T::AccountId>, OuterOrigin>> + From<RawOrigin<T::AccountId>>,
+{
+	type Success = T::AccountId;
+
+	fn try_address_origin(address: &H160, origin: OuterOrigin) -> Result<T::AccountId, OuterOrigin> {
+		origin.into().and_then(|o| match o {
+			RawOrigin::Signed(who) => {
+				if let Some(acc) = Accounts::<T>::get(address) {
+					if acc == who {
+						return Ok(who);
+					}
+					return Err(OuterOrigin::from(RawOrigin::Signed(who)));
+				}
+				return Err(OuterOrigin::from(RawOrigin::Signed(who)));
+			}
+			r => Err(OuterOrigin::from(r)),
+		})
+	}
 }
 
 /// Identity address mapping.
